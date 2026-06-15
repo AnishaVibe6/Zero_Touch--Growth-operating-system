@@ -26,7 +26,7 @@ from app.models.audit import MergedAuditData
 
 logger = structlog.get_logger()
 
-_client = Groq(api_key=settings.groq_api_key)
+_client = Groq(api_key=settings.groq_api_key or "demo-mode-no-key")
 
 # ── Output models ─────────────────────────────────────────────────────────────
 
