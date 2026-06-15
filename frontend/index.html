@@ -717,7 +717,23 @@
   /* ── Polling ─────────────────────────────────────────────────────────── */
   async function poll(id) {
     try {
-      const data = await fetch(`${API_BASE}/audit/${id}`).then(r=>r.json());
+      const res = await fetch(`${API_BASE}/audit/${id}`);
+      if (!res.ok) {
+        if (res.status === 404) {
+          // Stale audit ID (e.g. server restarted) — clear URL and go back to form
+          history.replaceState(null, '', '/');
+          resetAudit();
+          const b=$('err-box');
+          b.innerHTML = 'Audit session expired — please submit a new audit.';
+          b.classList.remove('hidden');
+          $('form-section').classList.remove('hidden');
+          $('progress-section').classList.add('hidden');
+        } else {
+          setTimeout(()=>poll(id),3000);
+        }
+        return;
+      }
+      const data = await res.json();
       applyStatus(data.status);
       if (data.status==='completed')    await fetchReport(id);
       else if (data.status==='failed')  {

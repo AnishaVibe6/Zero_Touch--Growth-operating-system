@@ -55,11 +55,12 @@ def launch_audit(request: AuditRequest) -> str:
         run_crawler.s(audit_id, url, ctx) if url else noop.s(audit_id, "crawler"),
     ]
 
+    supabase_client.update_audit_status(audit_id, "running")
+
     pipeline = chord(parallel_tasks)(
         build_report.s(audit_id, request.model_dump(mode="json"))
     )
 
-    supabase_client.update_audit_status(audit_id, "running")
     log.info("audit.launched")
     return audit_id
 

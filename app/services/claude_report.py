@@ -715,6 +715,214 @@ def _call_llm(system_prompt: str, user_prompt: str, log) -> dict:
     return _call_groq(system_prompt, user_prompt)
 
 
+# ── Demo mode (no valid LLM key configured) ──────────────────────────────────
+
+def _is_demo_mode() -> bool:
+    """True when no real Groq API key is configured (placeholder or missing)."""
+    key = settings.groq_api_key or ""
+    return not key or "placeholder" in key.lower() or not key.startswith("gsk_")
+
+
+def _build_demo_data(merged: "MergedAuditData", profile: "ProfileContext") -> dict:
+    """Deterministic mock report built from worker results — no LLM needed."""
+    bname = merged.request.business_name
+    city  = merged.request.city or "India"
+    has_website = bool(merged.request.website_url)
+    has_gmb     = merged.google_places.gmb_exists
+    followers   = merged.instagram.followers or 0
+    load_time   = merged.crawler.load_time_s if merged.crawler else None
+
+    # Heuristic scores
+    local_seo_score = 72 if has_gmb else 18
+    if has_website and load_time:
+        web_perf_score = 60 if load_time < 2 else (42 if load_time < 4 else 22)
+    elif has_website:
+        web_perf_score = 45
+    else:
+        web_perf_score = 12
+    social_score = min(78, 20 + followers // 50) if followers > 0 else 22
+    website_quality_score = 58 if has_website else 15
+
+    overall = round(
+        web_perf_score * 0.25 +
+        local_seo_score * 0.35 +
+        social_score * 0.20 +
+        website_quality_score * 0.20
+    )
+
+    channel = _CHANNEL_MAP.get(
+        (profile.profile_type, profile.extracted.business_model),
+        "Google Ads (local search)",
+    )
+
+    bm           = profile.benchmark
+    monthly_cust = bm.get("monthly_customers_estimate", 400)
+    avg_order    = bm.get("avg_order_value", 600)
+    budget       = int(float(merged.request.monthly_ad_spend or 0)) or 5000
+    leads        = max(5, round(monthly_cust * 0.12))
+    cpl          = round(budget / leads) if leads else 500
+
+    def _label(s: int) -> str:
+        if s <= 40: return "Poor"
+        if s <= 60: return "Needs Work"
+        if s <= 80: return "Good"
+        return "Excellent"
+
+    slug = bname.lower().replace(" ", "")
+
+    return {
+        "overall_score": overall,
+        "headline": f"{bname} is invisible on Google — competitors are winning your customers right now.",
+        "revenue_loss_reason": (
+            f"Local businesses in {city} serve ~{monthly_cust} customers/month at ₹{avg_order} avg — "
+            f"{bname}'s{'missing Google listing' if not has_gmb else ' weak online presence'} "
+            f"costs roughly 15% of that monthly opportunity."
+        ),
+        "keywords": [
+            f"{bname} {city}", f"shop near me {city}", f"best shop {city}",
+            f"{city} local shop", f"{bname} online", f"top shop {city}",
+            f"buy {city}", f"{bname} contact",
+        ],
+        "quick_wins": [
+            f"Create {bname}'s Google Business Profile at business.google.com — free, takes 15 minutes",
+            "Add a WhatsApp click-to-chat button so customers can message you instantly",
+            "Upload 10 product/shop photos to your Google Maps listing today",
+        ],
+        "roadmap_weeks": [
+            f"Claim and fully complete {bname}'s Google Business Profile with photos, hours, and category",
+            f"Launch first {channel} campaign targeting '{bname} {city}' and nearby searches",
+            "Collect 5 customer reviews by asking your best regulars this week",
+            "Review ad performance and double budget on the best-performing keyword",
+        ],
+        "we_will": [
+            f"We will set up {bname}'s Google Business Profile with 15 photos and correct location — "
+            f"listings with 15+ photos get 42% more direction requests",
+            f"We will add a WhatsApp click-to-chat link for {bname} — "
+            f"68% of Indian buyers contact via WhatsApp before purchasing",
+            f"We will run {channel} targeting local searchers for {bname} at ₹{budget}/month — "
+            f"targeting {leads} new customer enquiries per month",
+        ],
+        "web_performance": {
+            "score": web_perf_score,
+            "label": _label(web_perf_score),
+            "summary": (
+                f"{bname} has no website — customers searching online cannot find or verify you."
+                if not has_website else
+                f"{bname}'s website {'loads quickly' if web_perf_score > 55 else 'is slow on mobile'} — "
+                f"{'maintain this advantage' if web_perf_score > 55 else 'this loses you customers on 4G connections'}."
+            ),
+            "recommendations": [
+                f"{'Build a mobile-first website for' if not has_website else 'Improve page speed for'} {bname} with services and contact details",
+                "Add SSL certificate (HTTPS) to build customer trust",
+                "Include a WhatsApp click-to-chat button on every page",
+            ],
+            "competitor_hint": f"Top-rated shops in {city} load in under 2 seconds on mobile — {bname} must match this.",
+            "category_avg": 48,
+        },
+        "local_seo": {
+            "score": local_seo_score,
+            "label": _label(local_seo_score),
+            "summary": (
+                f"{bname} has no Google Maps listing — 73% of local buyers check Maps before visiting a shop."
+                if not has_gmb else
+                f"Strong point: {bname} has a Google Maps listing — keep it updated with fresh photos and respond to reviews."
+            ),
+            "recommendations": [
+                f"{'Create' if not has_gmb else 'Optimise'} {bname}'s Google Business Profile immediately",
+                "Add 15+ product photos to your Google Maps listing",
+                "Respond to every customer review within 24 hours — this boosts ranking",
+            ],
+            "competitor_hint": f"Top competitors in {city} have 100+ Google reviews. {bname} needs to start collecting them now.",
+            "category_avg": 52,
+        },
+        "social_presence": {
+            "score": social_score,
+            "label": _label(social_score),
+            "summary": (
+                f"{bname} has no Instagram presence — social proof builds trust before customers visit your shop."
+                if not followers else
+                f"{bname} has {followers} Instagram followers — {'a strong base to build on' if followers > 500 else 'growing but needs consistent posting to compete'}."
+            ),
+            "recommendations": [
+                f"{'Create an Instagram business account for' if not followers else 'Post 3x per week for'} {bname}",
+                "Share product photos with location tags in every post",
+                "Add your WhatsApp number and Google Maps link in your Instagram bio",
+            ],
+            "competitor_hint": f"Active shops in {city} have 500+ Instagram followers driving walk-in traffic daily.",
+            "category_avg": 38,
+        },
+        "website_quality": {
+            "score": website_quality_score,
+            "label": _label(website_quality_score),
+            "summary": (
+                f"{bname} needs a website — without one, you lose every customer who searches online before visiting."
+                if not has_website else
+                f"{bname}'s website needs quality improvements — trust signals like reviews, SSL, and WhatsApp links convert visitors into customers."
+            ),
+            "recommendations": [
+                f"Build a simple website for {bname} with services, address, phone, and WhatsApp button",
+                "Add customer testimonials and product photos",
+                "Embed Google Maps on your contact page for easy directions",
+            ],
+            "competitor_hint": f"All top-rated shops in {city} have a website with WhatsApp integration.",
+            "category_avg": 55,
+        },
+        "campaign_preview": {
+            "channel": channel,
+            "monthly_budget_inr": budget,
+            "expected_leads": leads,
+            "cost_per_lead_inr": cpl,
+            "ad_copies": [
+                {
+                    "headline": f"{bname[:28]} — {city}"[:30],
+                    "description": f"Visit {bname} in {city}. Quality products, great service. WhatsApp us now!",
+                    "display_url": f"{slug}.com › {city.lower().replace(' ', '-')}",
+                },
+                {
+                    "headline": f"Best Shop in {city}"[:30],
+                    "description": f"Trusted by local customers in {city}. Find {bname} on Google Maps. Call today.",
+                    "display_url": f"{slug}.com › products",
+                },
+                {
+                    "headline": f"Contact {bname[:22]} Today"[:30],
+                    "description": f"WhatsApp {bname} for instant response. Serving {city} customers every day.",
+                    "display_url": f"{slug}.com › contact",
+                },
+            ],
+        },
+        "google_ads_preview": {
+            "headline_1": f"{bname[:28]} {city}"[:30],
+            "headline_2": f"Best Local Shop in {city}"[:30],
+            "headline_3": "Call or WhatsApp Us Now",
+            "description_1": f"Visit {bname} in {city} — quality products at great prices. Get directions on Google Maps.",
+            "description_2": f"Trusted by hundreds of local customers. WhatsApp us for instant response. Open daily.",
+            "display_url": f"{slug}.com › {city.lower().replace(' ', '-')}",
+        },
+        "facebook_ads_preview": {
+            "primary_text": f"Looking for the best shop in {city}? {bname} has you covered — quality products, friendly service, and easy WhatsApp ordering.",
+            "headline": f"{bname} — Now Serving {city}",
+            "description": f"Visit us or WhatsApp to order. Serving {city} customers daily.",
+            "cta_button": "Get Quote",
+            "target_audience": f"People aged 25–55 in {city} interested in local shopping and quality products",
+        },
+        "instagram_preview": {
+            "content_type": "Reel",
+            "hook_line": f"Did you know {bname} is right here in {city}?",
+            "caption": f"Your go-to shop in {city} 📍 Quality products, friendly prices. DM us or tap the link to find us on Maps!",
+            "hashtags": [
+                city.lower().replace(" ", ""),
+                f"{city.lower().replace(' ', '')}shop",
+                "localshop",
+                "supportlocal",
+                bname.lower().replace(" ", ""),
+                "shoplocal",
+                f"{city.lower().replace(' ', '')}business",
+                "indialocal",
+            ],
+        },
+    }
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def generate_report(merged: MergedAuditData) -> AuditReport:
@@ -799,19 +1007,26 @@ def generate_report(merged: MergedAuditData) -> AuditReport:
     )
     log.info("llm.prompt_chars", system=len(system_prompt), user=len(prompt))
 
-    # ── Step 5: LLM call (Ollama or Groq) ────────────────────────────────────
-    try:
-        d = _call_llm(system_prompt, prompt, log)
-    except RateLimitError as exc:
-        m = re.search(r"try again in ([\d]+m[\d.]+s|[\d.]+s)", str(exc), re.IGNORECASE)
-        wait = m.group(1) if m else "a few minutes"
-        log.warning("groq.rate_limit", wait=wait)
-        raise RuntimeError(f"Daily AI quota reached — please try again in {wait}") from exc
-    except httpx.ConnectError:
-        raise RuntimeError(
-            "Ollama is not running — start it with: ollama serve"
+    # ── Step 5: LLM call (Ollama or Groq) or demo mode ──────────────────────
+    if _is_demo_mode() and not settings.use_ollama:
+        log.warning(
+            "llm.demo_mode",
+            reason="No valid Groq API key — returning deterministic demo report. Add GROQ_API_KEY to .env for real AI analysis.",
         )
-    log.info("llm.done", backend="ollama" if settings.use_ollama else "groq")
+        d = _build_demo_data(merged, profile)
+    else:
+        try:
+            d = _call_llm(system_prompt, prompt, log)
+        except RateLimitError as exc:
+            m = re.search(r"try again in ([\d]+m[\d.]+s|[\d.]+s)", str(exc), re.IGNORECASE)
+            wait = m.group(1) if m else "a few minutes"
+            log.warning("groq.rate_limit", wait=wait)
+            raise RuntimeError(f"Daily AI quota reached — please try again in {wait}") from exc
+        except httpx.ConnectError:
+            raise RuntimeError(
+                "Ollama is not running — start it with: ollama serve"
+            )
+        log.info("llm.done", backend="ollama" if settings.use_ollama else "groq")
 
     # ── Log raw campaign fields for debugging ────────────────────────────────
     _cp_raw = d.get("campaign_preview", {})

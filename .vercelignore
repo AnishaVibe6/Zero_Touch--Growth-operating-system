@@ -1,0 +1,13 @@
+.env
+*.log
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+tests/
+scripts/
+report_screenshot.png
+server_new*.log
+supabase/
+docker-compose.yml
+Dockerfile

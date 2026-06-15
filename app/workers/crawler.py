@@ -7,7 +7,12 @@ import time
 
 import structlog
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+
+try:
+    from playwright.sync_api import sync_playwright as _sync_playwright
+    _PLAYWRIGHT_OK = True
+except Exception:
+    _PLAYWRIGHT_OK = False
 
 from app.models.audit import CrawlerResult
 from app.workers.celery_app import celery_app
@@ -23,6 +28,9 @@ _SOCIAL_RE = re.compile(r"(facebook|instagram|twitter|linkedin|youtube)\.com", r
 
 def _render(url: str) -> tuple[str, float, bool]:
     """Returns (html, load_time_s, has_ssl). Uses Playwright Chromium."""
+    if not _PLAYWRIGHT_OK:
+        raise RuntimeError("Playwright is not available in this environment")
+    sync_playwright = _sync_playwright
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(

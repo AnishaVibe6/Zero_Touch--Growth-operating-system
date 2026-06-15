@@ -1,3 +1,4 @@
+import structlog
 from fastapi import APIRouter, HTTPException
 
 from app.models.audit import AuditRequest, AuditStatusResponse
@@ -6,13 +7,20 @@ from app.services.orchestrator import launch_audit
 from app.services.supabase_client import supabase_client
 
 router = APIRouter()
+logger = structlog.get_logger()
 
 
 @router.post("", response_model=dict, status_code=202)
 def start_audit(request: AuditRequest):
     """Submit a new audit. Returns audit_id immediately; poll /audit/{id} for status."""
-    audit_id = launch_audit(request)
-    return {"audit_id": audit_id, "status": "pending"}
+    try:
+        audit_id = launch_audit(request)
+        return {"audit_id": audit_id, "status": "pending"}
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        logger.error("audit.start_failed", error=str(exc), traceback=tb)
+        raise HTTPException(status_code=500, detail=tb)
 
 
 @router.get("/{audit_id}", response_model=AuditStatusResponse)

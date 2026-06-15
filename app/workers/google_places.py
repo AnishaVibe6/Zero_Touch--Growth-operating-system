@@ -141,7 +141,8 @@ def fetch_google_places(
     business_description: str | None = None,
 ) -> GooglePlacesResult:
     if not settings.serpapi_key:
-        raise RuntimeError("SERPAPI_KEY is not set in .env")
+        logger.warning("google_places.skipped", reason="SERPAPI_KEY not set")
+        return GooglePlacesResult(error="SERPAPI_KEY not configured")
 
     location = city.strip() if city else "India"
 
